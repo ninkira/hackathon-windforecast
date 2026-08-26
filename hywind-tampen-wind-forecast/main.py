@@ -1,8 +1,11 @@
+import base64
+
 import pandas as pd, os
 import plotly
 import plotly.graph_objects as go
 import numpy as np
 from PIL import Image
+from pathlib import Path
 from cv2.gapi.ot import NEW
 from scipy.ndimage import maximum_filter, minimum_filter
 
@@ -31,48 +34,36 @@ if __name__ == '__main__':
     print("\ncols only in train:", set(train.columns) - set(test.columns))
     print("missing frac:\n", train.isna().mean().sort_values(ascending=False).head(10))
 
-
-
-
-    x = [120, 340, 890]  # pixel x
-    y = [80, 410, 220]  # pixel y
-    val = [0.91, 0.87, 0.95]  # for labels/hover
-    max_rc, min_rc = local_extrema(val, size=7, thresh=np.percentile(val, 90))
-    img = Image.open("./images/map.png")
-    w, h = img.size
-
-        # ---------------------------------------------------------------
-        # Dummy data: three clusters of turbines off the Norwegian coast
-        # ---------------------------------------------------------------
+    # ---------------------------------------------------------------
+    # 2. Dummy turbine data - swap for your real lat/lon/wind columns
+    # ---------------------------------------------------------------
     rng = np.random.default_rng(7)
 
     clusters = [
-        (61.33, 2.28, 25),  # lat, lon, how many turbines
+        (61.33, 2.28, 25),  # lat, lon, count
         (61.05, 2.55, 18),
         (61.55, 1.95, 12),
     ]
 
-    frames = []
-    for i, (lat0, lon0, n) in enumerate(clusters):
-        frames.append(pd.DataFrame({
+    df = pd.concat([
+        pd.DataFrame({
             "lat": rng.normal(lat0, 0.09, n),
             "lon": rng.normal(lon0, 0.16, n),
             "wind": rng.normal(14, 2.5, n).clip(5, 25),
             "site": [f"C{i}-T{j:02d}" for j in range(n)],
-        }))
+        })
+        for i, (lat0, lon0, n) in enumerate(clusters)
+    ], ignore_index=True)
 
-    df = pd.concat(frames, ignore_index=True)
-
+    # ---------------------------------------------------------------
+    # 3. Build the map
+    # ---------------------------------------------------------------
     NEW = tuple(int(p) for p in plotly.__version__.split(".")[:2]) >= (5, 24)
     Density = go.Densitymap if NEW else go.Densitymapbox
     Scatter = go.Scattermap if NEW else go.Scattermapbox
     MAP_KEY = "map" if NEW else "mapbox"
 
-    # ---------------------------------------------------------------
-    # Colourscale: transparent at the bottom so the basemap shows
-    # through where there is no data. Without the rgba(0,0,0,0) stop
-    # you get an opaque wash over the whole viewport.
-    # ---------------------------------------------------------------
+    # transparent at the bottom so the basemap shows through
     SCALE = [
         [0.00, "rgba(0,0,0,0)"],
         [0.25, "#3ecf4a"],
@@ -84,40 +75,50 @@ if __name__ == '__main__':
     fig = go.Figure()
 
     fig.add_trace(Density(
-        lat=df.lat,
-        lon=df.lon,
-        z=df.wind,
-        radius=45,  # screen pixels, not km - changes with zoom
-        opacity=0.65,
-        colorscale=SCALE,
-        colorbar=dict(title="m/s"),
+        lat=df.lat, lon=df.lon, z=df.wind,
+        radius=45, opacity=0.65,
+        colorscale=SCALE, colorbar=dict(title="m/s"),
         hoverinfo="skip",
     ))
 
     fig.add_trace(Scatter(
-        lat=df.lat,
-        lon=df.lon,
-        mode="markers",
+        lat=df.lat, lon=df.lon, mode="markers",
         marker=dict(size=df.wind * 0.9, color="#c0392b", opacity=0.9),
         text=[f"{s}: {w:.1f} m/s" for s, w in zip(df.site, df.wind)],
         hovertemplate="%{text}<extra></extra>",
         name="turbines",
     ))
 
-    # carto-positron / open-street-map / carto-darkmatter need no token.
-    # "satellite" only works on plotly >= 5.24.
+    layout = dict(
+        style="carto-positron",
+        center=dict(lat=61.3, lon=2.3),
+        zoom=7.5,
+    )
+
+    # ---------------------------------------------------------------
+    # 4. Optional image overlay - skipped if the file is not there.
+    #    CORNERS: [lon, lat] for top-left, top-right, bottom-right, bottom-left
+    # ---------------------------------------------------------------
+    IMAGE_PATH = Path("./images/map.png")
+    CORNERS = [[1.90, 61.60], [2.70, 61.60], [2.70, 61.00], [1.90, 61.00]]
+
+    if IMAGE_PATH.exists():
+        uri = "data:image/png;base64," + base64.b64encode(IMAGE_PATH.read_bytes()).decode()
+        layout["layers"] = [dict(
+            sourcetype="image", source=uri, coordinates=CORNERS,
+            opacity=0.7, below="traces",
+        )]
+        print("image overlay added")
+    else:
+        print(f"no image at {IMAGE_PATH} - map drawn without overlay")
+
     fig.update_layout(**{
-        MAP_KEY: dict(
-            style="carto-positron",
-            center=dict(lat=61.3, lon=2.3),
-            zoom=7.5,
-        ),
+        MAP_KEY: layout,
         "margin": dict(l=0, r=0, t=0, b=0),
         "height": 620,
     })
 
-
-    print(f"plotly {plotly.__version__} - using {'map' if NEW else 'mapbox'} trace names")
+    print(f"plotly {plotly.__version__} - using {'map' if NEW else 'mapbox'} names")
     fig.write_html("wind_density_map.html", auto_open=False)
     print("wrote wind_density_map.html")
     fig.show()
