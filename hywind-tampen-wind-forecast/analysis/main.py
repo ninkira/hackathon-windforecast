@@ -21,7 +21,7 @@ def local_extrema(z, size=5, thresh=None):
 
 
 if __name__ == '__main__':
-    data_dir = "./data"
+    data_dir = "../data"
     train = pd.read_parquet(os.path.join(data_dir, "windfeels_train.parquet"))
     test  = pd.read_parquet(os.path.join(data_dir, "windfeels_test.parquet"))
     print(train.shape, test.shape)

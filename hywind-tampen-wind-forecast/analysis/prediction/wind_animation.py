@@ -25,7 +25,7 @@ PAGE_SUBTITLE = "Hywind Tampen and the surrounding Tampen platforms"
 
 # Second graphic: the XGBoost forecast plot. Set the CSV to None to keep
 # the placeholder. The module must expose plot_forecast_plotly(df, ...).
-FORECAST_CSV = HERE / "data" / "validation_sample_90_20241009_0522.csv"
+FORECAST_CSV =  "./data/validation_sample_90_20241009_0522.csv"
 FORECAST_MODULE = "forecast_plot"   # the .py file next to this one
 FORECAST_FUNC = None                # None = auto-detect the plotting function
 FORECAST_SAMPLE = "90"
