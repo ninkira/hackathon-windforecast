@@ -40,6 +40,10 @@ turbines.
 This graph visualises the forecast wind conditions for one individual turbine (HYT-HY09) over the
 next 30 and 60 minutes.
 
+### Files
+
+This repository contains the scripts we created during the hackathon to build the platform. The dashboard can be found within 'hywind-tampen-wind-forecast/wind_forecast_portal.html' file.
+
 ## Data
 
 The data used for this project comes from nearby offshore installations and the wind farm itself,
@@ -77,7 +81,7 @@ Each episode provides **180 minutes of history** from all 17 locations. The last
 history is the **forecast origin**. The task is to predict the HY09 wind speed **30 and 60 minutes
 after** it.
 
-![One episode](images/episode_example.png)
+![One episode](hywind-tampen-wind-forecast/images/episode_example.png)
 
 *A real wind drop, taken from the training period. The green part is provided. The dotted red part is
 removed from the file — including the ten other turbines and the neighbouring platforms. The two
