@@ -1,9 +1,64 @@
-import pandas as pd
+"""Plot XGBoost wind-speed forecasts against observations for one validation sample."""
+
+import argparse
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 
 
-def plot_forecast_plotly(df, sample_id="90", station="HY09"):
+# =============================================================
+# Paths
+# Resolved relative to this file, so the script works from any
+# working directory as long as the repo layout is intact:
+#   <repo>/analysis/prediction/forecast_plot.py
+#   <repo>/data/validation_sample_*.csv
+# =============================================================
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parents[1]
+DATA_DIR = PROJECT_ROOT / "data"
+DEFAULT_CSV = DATA_DIR / "validation_sample_90_20241009_0522.csv"
+
+
+# =============================================================
+# Helpers
+# =============================================================
+def _fmt(value):
+    """Format a value for a legend label, tolerating NaN."""
+    return "n/a" if pd.isna(value) else f"{value:.2f}"
+
+
+def _add_time_line(fig, t, color, dash, width):
+    """Vertical line at time t, spanning the plot area.
+
+    add_shape is used instead of add_vline because add_vline averages
+    x0 and x1 whenever an annotation is attached, which fails on
+    pandas Timestamps.
+    """
+    fig.add_shape(
+        type="line",
+        x0=t,
+        x1=t,
+        y0=0,
+        y1=1,
+        xref="x",
+        yref="paper",
+        line=dict(
+            color=color,
+            dash=dash,
+            width=width
+        )
+    )
+
+
+def plot_forecast_plotly(
+    df,
+    sample_id="90",
+    station="HY09",
+    tolerance=pd.Timedelta(minutes=5),
+    show=True
+):
 
     # =========================================================
     # Prepare data
@@ -21,8 +76,7 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
     if not forecast_mask.any():
         raise ValueError("No non-NaN values found in 'Forecast'.")
 
-    origin_idx = forecast_mask.idxmax()
-    origin_time = df.loc[origin_idx, "Time"]
+    origin_time = df.loc[df.index[forecast_mask][0], "Time"]
 
     history = df[df["Time"] <= origin_time]
     future = df[df["Time"] >= origin_time]
@@ -34,7 +88,17 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
     t60 = origin_time + pd.Timedelta(minutes=60)
 
     def nearest_row(t):
-        idx = (df["Time"] - t).abs().idxmin()
+        """Row closest to t, or an error if nothing lies within tolerance."""
+        diffs = (df["Time"] - t).abs()
+        idx = diffs.idxmin()
+
+        if diffs.loc[idx] > tolerance:
+            raise ValueError(
+                f"No observation within {tolerance} of {t:%Y-%m-%d %H:%M}. "
+                f"Sample covers {df['Time'].min():%Y-%m-%d %H:%M} to "
+                f"{df['Time'].max():%Y-%m-%d %H:%M}."
+            )
+
         return df.loc[idx]
 
     row30 = nearest_row(t30)
@@ -42,21 +106,20 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
 
     # =========================================================
     # Validation metrics
+    # Restricted to the 0-60 min horizon, which is what the
+    # title claims. Without the t60 cut these would cover the
+    # full length of the sample.
     # =========================================================
-    eval_df = future.dropna(subset=["Actual", "Forecast"])
+    eval_df = (
+        future[future["Time"] <= t60]
+        .dropna(subset=["Actual", "Forecast"])
+    )
 
     if len(eval_df) > 0:
-        rmse = np.sqrt(
-            np.mean(
-                (eval_df["Actual"] - eval_df["Forecast"]) ** 2
-            )
-        )
+        errors = eval_df["Actual"] - eval_df["Forecast"]
 
-        mae = np.mean(
-            np.abs(
-                eval_df["Actual"] - eval_df["Forecast"]
-            )
-        )
+        rmse = float(np.sqrt(np.mean(errors ** 2)))
+        mae = float(np.mean(np.abs(errors)))
     else:
         rmse = np.nan
         mae = np.nan
@@ -120,40 +183,47 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
 
     # =========================================================
     # Forecast origin
+    # Line and label are added separately; see _add_time_line.
     # =========================================================
-    fig.add_vline(
+    _add_time_line(
+        fig,
+        origin_time,
+        color="gray",
+        dash="dash",
+        width=2
+    )
+
+    fig.add_annotation(
         x=origin_time,
-        line=dict(
-            color="gray",
-            dash="dash",
-            width=2
-        ),
-        annotation_text="Forecast origin",
-        annotation_position="top"
+        y=1,
+        xref="x",
+        yref="paper",
+        yanchor="bottom",
+        text="Forecast origin",
+        showarrow=False,
+        font=dict(size=12)
     )
 
     # =========================================================
     # +30 minute vertical line
     # =========================================================
-    fig.add_vline(
-        x=t30,
-        line=dict(
-            color="lightsteelblue",
-            dash="dot",
-            width=2.5
-        )
+    _add_time_line(
+        fig,
+        t30,
+        color="lightsteelblue",
+        dash="dot",
+        width=2.5
     )
 
     # =========================================================
     # +60 minute vertical line
     # =========================================================
-    fig.add_vline(
-        x=t60,
-        line=dict(
-            color="goldenrod",
-            dash="dot",
-            width=3
-        )
+    _add_time_line(
+        fig,
+        t60,
+        color="goldenrod",
+        dash="dot",
+        width=3
     )
 
     # =========================================================
@@ -172,7 +242,7 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
                     width=1
                 )
             ),
-            name=f"Forecast +30 min: {row30['Forecast']:.2f}",
+            name=f"Forecast +30 min: {_fmt(row30['Forecast'])}",
             legendgroup="markers"
         )
     )
@@ -195,7 +265,7 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
                     width=2
                 )
             ),
-            name=f"Actual +30 min: {row30['Actual']:.2f}",
+            name=f"Actual +30 min: {_fmt(row30['Actual'])}",
             legendgroup="markers"
         )
     )
@@ -216,7 +286,7 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
                     width=1
                 )
             ),
-            name=f"Forecast +60 min: {row60['Forecast']:.2f}",
+            name=f"Forecast +60 min: {_fmt(row60['Forecast'])}",
             legendgroup="markers"
         )
     )
@@ -239,7 +309,7 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
                     width=2
                 )
             ),
-            name=f"Actual +60 min: {row60['Actual']:.2f}",
+            name=f"Actual +60 min: {_fmt(row60['Actual'])}",
             legendgroup="markers"
         )
     )
@@ -248,11 +318,12 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
     # Metrics
     # =========================================================
     if np.isnan(rmse):
-        metrics_text = "RMSE: n/a | MAE: n/a"
+        metrics_text = "0-60 min RMSE: n/a | MAE: n/a"
     else:
         metrics_text = (
-            f"60-min RMSE: {rmse:.3f} | "
-            f"MAE: {mae:.3f}"
+            f"0-60 min RMSE: {rmse:.3f} | "
+            f"MAE: {mae:.3f} "
+            f"(n={len(eval_df)})"
         )
 
     # =========================================================
@@ -325,7 +396,6 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
             bordercolor="black",
             borderwidth=1,
 
-            # Larger legend font
             font=dict(
                 size=13
             ),
@@ -362,7 +432,8 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
     # =========================================================
     # Display
     # =========================================================
-    fig.show()
+    if show:
+        fig.show()
 
     return fig
 
@@ -370,12 +441,41 @@ def plot_forecast_plotly(df, sample_id="90", station="HY09"):
 # =============================================================
 # Run plot
 # =============================================================
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=DEFAULT_CSV,
+        help=f"Validation CSV to plot (default: {DEFAULT_CSV})"
+    )
+    parser.add_argument(
+        "--sample-id",
+        default="90"
+    )
+    parser.add_argument(
+        "--station",
+        default="HY09"
+    )
+
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
 
-    result_data = pd.read_csv("C:\\Users\\506895\\swdevelopment\\MS Modeler\\ms_modeler\\hackathon\\data_file\\validation_sample_90_20241009_0522.csv")
+    args = parse_args()
+
+    if not args.csv.exists():
+        raise FileNotFoundError(
+            f"CSV not found: {args.csv}\n"
+            f"Expected the data directory at: {DATA_DIR}"
+        )
+
+    result_data = pd.read_csv(args.csv)
+
     plot_forecast_plotly(
         result_data,
-        sample_id="90",
-        station="HY09"
+        sample_id=args.sample_id,
+        station=args.station
     )
